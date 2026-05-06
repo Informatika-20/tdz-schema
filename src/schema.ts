@@ -59,7 +59,6 @@ export const classes = pgTable(
     name: varchar("name", { length: 256 }),
     testKey: varchar("test_key", { length: 32 }), // references tests.key
     grade: smallint("grade"),
-    testNumber: smallint("test_number").default(2),
     teacherId: varchar("teacher_id", { length: 36 }).references(
       () => teachers.id,
     ),
