@@ -266,3 +266,29 @@ export const cohortTestAccess = pgTable(
     index("cohort_test_access_test_id_idx").on(table.testId),
   ],
 );
+
+// Recordings from the interactive question prototypes (universal action log +
+// grading). One row per student's run of one prototype; the full event log is
+// stored as jsonb. Standalone — no foreign keys (prototypes are not yet tied to
+// real classes/students).
+export const prototypeRecordings = pgTable(
+  "prototype_recordings",
+  {
+    id: varchar("id", { length: 64 }).primaryKey(),
+    prototype: varchar("prototype", { length: 32 }).notNull(),
+    student: varchar("student", { length: 64 }),
+    startedAt: timestamp("started_at").notNull(),
+    events: jsonb("events").notNull(),
+    durationMs: integer("duration_ms").notNull(),
+    actionCount: integer("action_count").notNull(),
+    attempts: smallint("attempts").notNull(),
+    firstTry: boolean("first_try").notNull(),
+    solved: boolean("solved").notNull(),
+    finalScore: smallint("final_score").notNull(), // 0-100 correctness
+    meta: jsonb("meta"), // reserved for future "characteristics" (grade, class…)
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("prototype_recordings_prototype_idx").on(table.prototype),
+  ],
+);
