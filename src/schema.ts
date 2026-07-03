@@ -121,7 +121,17 @@ export const studentAnswers = pgTable("student_answers", {
   score: smallint("score"),
   metadata: jsonb("metadata"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+},
+  (table) => [
+    // Speeds the UNION/COUNT-DISTINCT scans that join student_answers by class_id
+    // and count distinct students per round (dashboard KPIs & return-rate breakdown).
+    index("student_answers_class_student_test_idx").on(
+      table.classId,
+      table.studentNumber,
+      table.testNumber,
+    ),
+  ],
+);
 
 export const cache = pgTable("cache", {
   id: varchar("id", { length: 36 })
@@ -155,6 +165,14 @@ export const studentModuleScores = pgTable(
     index("sms_class_id_idx").on(table.classId),
     index("sms_test_number_idx").on(table.testNumber),
     index("sms_class_test_idx").on(table.classId, table.testNumber),
+    // Supports the round-over-round improvement self-join, which matches rows on
+    // (class_id, student_number, module_id) and filters by test_number.
+    index("sms_class_student_module_test_idx").on(
+      table.classId,
+      table.studentNumber,
+      table.moduleId,
+      table.testNumber,
+    ),
   ],
 );
 
