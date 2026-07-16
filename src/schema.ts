@@ -11,6 +11,7 @@ import {
   boolean,
   index,
   text,
+  primaryKey,
 } from "drizzle-orm/pg-core";
 
 /**
@@ -212,19 +213,52 @@ export const tests = pgTable("tests", {
 });
 
 // Archive table for historical studentAnswers data (backup only, no foreign keys)
-export const studentAnswersArchive = pgTable("student_answers_archive", {
-  id: varchar("id", { length: 36 }).primaryKey(),
-  studentNumber: smallint("student_number"),
-  classId: varchar("class_id", { length: 36 }),
-  testNumber: smallint("test_number"),
-  questionId: varchar("question_id", { length: 36 }),
-  answer: jsonb("answer"),
-  score: smallint("score"),
-  metadata: jsonb("metadata"),
-  createdAt: timestamp("created_at").notNull(),
-  schoolYear: varchar("school_year", { length: 256 }),
-  archivedAt: timestamp("archived_at").defaultNow().notNull(),
-});
+export const studentAnswersArchive = pgTable(
+  "student_answers_archive",
+  {
+    id: varchar("id", { length: 36 }).primaryKey(),
+    studentNumber: smallint("student_number"),
+    classId: varchar("class_id", { length: 36 }),
+    testNumber: smallint("test_number"),
+    questionId: varchar("question_id", { length: 36 }),
+    answer: jsonb("answer"),
+    score: smallint("score"),
+    metadata: jsonb("metadata"),
+    createdAt: timestamp("created_at").notNull(),
+    schoolYear: varchar("school_year", { length: 256 }),
+    archivedAt: timestamp("archived_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("saa_class_student_test_idx").on(
+      table.classId,
+      table.studentNumber,
+      table.testNumber,
+    ),
+    index("saa_created_at_idx").on(table.createdAt),
+    index("saa_question_id_idx").on(table.questionId),
+  ],
+);
+
+// One row per submitted test (class + student + round). Written at submit time,
+// reconciled by aggregation. The fast source for counts/return-rate/daily charts.
+// Deliberately no FK on classId — same rationale as the archive table.
+export const studentTests = pgTable(
+  "student_tests",
+  {
+    classId: varchar("class_id", { length: 36 }).notNull(),
+    studentNumber: smallint("student_number").notNull(),
+    testNumber: smallint("test_number").notNull(),
+    submittedAt: timestamp("submitted_at").notNull(), // original submission time
+    avgScorePercent: smallint("avg_score_percent"), // avg of module scorePercents, 0-100
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.classId, table.studentNumber, table.testNumber],
+    }),
+    index("student_tests_submitted_at_idx").on(table.submittedAt),
+  ],
+);
 
 // Cohorts - organizational groups for teachers (e.g., "AI - CTRL", "AI", "ZŠ")
 export const cohorts = pgTable(
