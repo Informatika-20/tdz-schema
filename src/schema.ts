@@ -10,6 +10,7 @@ import {
   integer,
   boolean,
   index,
+  text,
 } from "drizzle-orm/pg-core";
 
 /**
@@ -284,6 +285,27 @@ export const cohortTestAccess = pgTable(
     index("cohort_test_access_test_id_idx").on(table.testId),
   ],
 );
+
+// Test submissions that could not be persisted into student_answers (missing or
+// soft-deleted class, DB errors, …). Archive-style — NO foreign keys, because a
+// failure cause is precisely a deleted/missing class; FKs would make this
+// fallback write fail too. Rows are recovered or dismissed from the admin
+// dashboard (/secretDashboard/failedSubmissions).
+export const failedSubmissions = pgTable("failed_submissions", {
+  id: varchar("id", { length: 36 })
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  classId: varchar("class_id", { length: 36 }).notNull(), // class the student submitted into
+  studentNumber: smallint("student_number"), // nullable — may be missing/invalid in the payload
+  testNumber: smallint("test_number"),
+  answers: jsonb("answers").notNull(), // raw submitted Record<string, StoredAnswer> payload
+  error: text("error"), // the error message that caused the failure
+  status: varchar("status", { length: 16 }).default("pending").notNull(), // pending | recovered | dismissed
+  assignedClassId: varchar("assigned_class_id", { length: 36 }), // class it was recovered into (may differ from classId)
+  resolvedAt: timestamp("resolved_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").$onUpdateFn(() => new Date()),
+});
 
 // Recordings from the interactive question prototypes (universal action log +
 // grading). One row per student's run of one prototype; the full event log is
