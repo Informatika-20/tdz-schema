@@ -45,7 +45,6 @@ export const teachers = pgTable(
     wp_id: integer("wp_id"),
     teacher_info: jsonb("teacher_info"),
     school_edu_id: varchar("school_edu_id", { length: 36 }),
-    special_access: jsonb("special_access"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").$onUpdateFn(() => new Date()),
   },
@@ -203,11 +202,10 @@ export const tests = pgTable("tests", {
     .$defaultFn(() => crypto.randomUUID()),
   key: varchar("key", { length: 32 }).notNull().unique(), // matches modules.type and classes.test_key (e.g., "ss", "zs3", "ai1")
   name: varchar("name", { length: 256 }).notNull(), // display name (e.g., "Stredná škola", "AI pre 1. stupeň")
-  isDefault: boolean("is_default").default(false).notNull(), // default tests available to all teachers
+  isDefault: boolean("is_default").default(false).notNull(), // does NOT gate access (cohorts do) — marks core test types; secretDashboard and the dashboard KPI cache derive special dashboard levels from NOT is_default (readers: src/app/secretDashboard/page.tsx, src/server/cache/dashboardKpiCache.ts)
   modulesSelectable: boolean("modules_selectable").default(false).notNull(), // if true, teachers can select modules; if false, all modules for this test are used
   color: varchar("color", { length: 32 }), // optional, for UI styling
   description: varchar("description", { length: 512 }), // optional description
-  groupNames: jsonb("group_names").$type<string[]>().default([]), // array of group names for access control (e.g., ["AI - CTRL", "AI"])
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").$onUpdateFn(() => new Date()),
 });
@@ -282,9 +280,6 @@ export const cohorts = pgTable(
 export const teacherCohorts = pgTable(
   "teacher_cohorts",
   {
-    id: varchar("id", { length: 36 })
-      .primaryKey()
-      .$defaultFn(() => crypto.randomUUID()),
     teacherId: varchar("teacher_id", { length: 36 })
       .references(() => teachers.id)
       .notNull(),
@@ -294,7 +289,9 @@ export const teacherCohorts = pgTable(
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [
-    index("teacher_cohorts_teacher_id_idx").on(table.teacherId),
+    // Composite PK; its (teacher_id, …) prefix covers teacher_id lookups,
+    // so no separate teacher_id index is needed.
+    primaryKey({ columns: [table.teacherId, table.cohortId] }),
     index("teacher_cohorts_cohort_id_idx").on(table.cohortId),
   ],
 );
@@ -303,9 +300,6 @@ export const teacherCohorts = pgTable(
 export const cohortTestAccess = pgTable(
   "cohort_test_access",
   {
-    id: varchar("id", { length: 36 })
-      .primaryKey()
-      .$defaultFn(() => crypto.randomUUID()),
     cohortId: varchar("cohort_id", { length: 36 })
       .references(() => cohorts.id)
       .notNull(),
@@ -315,7 +309,9 @@ export const cohortTestAccess = pgTable(
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [
-    index("cohort_test_access_cohort_id_idx").on(table.cohortId),
+    // Composite PK; its (cohort_id, …) prefix covers cohort_id lookups,
+    // so no separate cohort_id index is needed.
+    primaryKey({ columns: [table.cohortId, table.testId] }),
     index("cohort_test_access_test_id_idx").on(table.testId),
   ],
 );
