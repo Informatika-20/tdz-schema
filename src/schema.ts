@@ -10,6 +10,7 @@ import {
   integer,
   boolean,
   index,
+  uniqueIndex,
   text,
   primaryKey,
 } from "drizzle-orm/pg-core";
@@ -108,6 +109,18 @@ export const questions = pgTable("questions", {
   updatedAt: timestamp("updated_at").$onUpdateFn(() => new Date()),
 });
 
+// THE single answers table — the source of truth for everything (ADR-0001 in
+// tdz). All Answers, current and historical, live here forever; there is no
+// archive table and no aggregation pipeline. Module scores and facts are
+// written in the same transaction as these rows at submit time.
+//
+// Legacy data notes (2026 unification of student_answers + the former
+// student_answers_archive):
+// - ~1,550 historical rows have NULL class/student/test keys — the columns
+//   stay nullable, and NULLs never collide in the unique index.
+// - questionId deliberately has NO foreign key: 2 historical rows reference
+//   questions that no longer exist, and deleting history to satisfy an FK
+//   isn't worth it. classId keeps its FK (0 violations at unification).
 export const studentAnswers = pgTable("student_answers", {
   id: varchar("id", { length: 36 })
     .primaryKey()
@@ -115,22 +128,34 @@ export const studentAnswers = pgTable("student_answers", {
   studentNumber: smallint("student_number"),
   classId: varchar("class_id", { length: 36 }).references(() => classes.id),
   testNumber: smallint("test_number"),
-  questionId: varchar("question_id", { length: 36 }).references(
-    () => questions.id,
-  ),
+  questionId: varchar("question_id", { length: 36 }),
   answer: jsonb("answer"),
   score: smallint("score"),
   metadata: jsonb("metadata"),
+  // Denormalized from classes at write time — the question-analysis queries
+  // filter whole seasons by it without joining classes.
+  schoolYear: varchar("school_year", { length: 256 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 },
   (table) => [
-    // Speeds the UNION/COUNT-DISTINCT scans that join student_answers by class_id
-    // and count distinct students per round (dashboard KPIs & return-rate breakdown).
+    // The Submission invariant (see tdz CONTEXT.md): a pupil answers a given
+    // question at most once per (class, round). This is what makes a duplicate
+    // Submission a constraint violation instead of silently blended data.
+    uniqueIndex("student_answers_submission_uq").on(
+      table.classId,
+      table.studentNumber,
+      table.testNumber,
+      table.questionId,
+    ),
+    // Per-class per-student scans (class page, SZP duplicate check).
     index("student_answers_class_student_test_idx").on(
       table.classId,
       table.studentNumber,
       table.testNumber,
     ),
+    // Date-based scans and the question-analysis GROUP BYs.
+    index("student_answers_created_at_idx").on(table.createdAt),
+    index("student_answers_question_id_idx").on(table.questionId),
   ],
 );
 
@@ -144,7 +169,11 @@ export const cache = pgTable("cache", {
   updatedAt: timestamp("updated_at").$onUpdateFn(() => new Date()),
 });
 
-// Aggregated student scores per module (replaces calculating from studentAnswers for historical data)
+// Per-pupil per-module percentages — a stored read model derived from
+// studentAnswers (the Rollup, see tdz CONTEXT.md). Written in the same
+// transaction as the answers at submit time; always reconstructible from
+// studentAnswers via the recompute script. Never more authoritative than the
+// answers behind it.
 export const studentModuleScores = pgTable(
   "student_module_scores",
   {
@@ -163,6 +192,15 @@ export const studentModuleScores = pgTable(
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [
+    // One score per pupil per module per round — the target of the submit-time
+    // upsert (ON CONFLICT on this index updates scorePercent, which is how SZP
+    // parts and recomputes overwrite in place).
+    uniqueIndex("sms_class_student_test_module_uq").on(
+      table.classId,
+      table.studentNumber,
+      table.testNumber,
+      table.moduleId,
+    ),
     index("sms_class_id_idx").on(table.classId),
     index("sms_test_number_idx").on(table.testNumber),
     index("sms_class_test_idx").on(table.classId, table.testNumber),
@@ -176,24 +214,6 @@ export const studentModuleScores = pgTable(
     ),
   ],
 );
-
-// Aggregated question statistics per class (tracks which questions students struggle with)
-export const questionStats = pgTable("question_stats", {
-  id: varchar("id", { length: 36 })
-    .primaryKey()
-    .$defaultFn(() => crypto.randomUUID()),
-  classId: varchar("class_id", { length: 36 })
-    .references(() => classes.id)
-    .notNull(),
-  testNumber: smallint("test_number").notNull(),
-  questionId: varchar("question_id", { length: 36 })
-    .references(() => questions.id)
-    .notNull(),
-  totalAnswers: smallint("total_answers").notNull(),
-  correctCount: smallint("correct_count").notNull(),
-  avgScore: smallint("avg_score").notNull(), // 0-100
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
 
 // Central table for all test types - modules.type and classes.test_key reference tests.key
 export const tests = pgTable("tests", {
@@ -210,36 +230,11 @@ export const tests = pgTable("tests", {
   updatedAt: timestamp("updated_at").$onUpdateFn(() => new Date()),
 });
 
-// Archive table for historical studentAnswers data (backup only, no foreign keys)
-export const studentAnswersArchive = pgTable(
-  "student_answers_archive",
-  {
-    id: varchar("id", { length: 36 }).primaryKey(),
-    studentNumber: smallint("student_number"),
-    classId: varchar("class_id", { length: 36 }),
-    testNumber: smallint("test_number"),
-    questionId: varchar("question_id", { length: 36 }),
-    answer: jsonb("answer"),
-    score: smallint("score"),
-    metadata: jsonb("metadata"),
-    createdAt: timestamp("created_at").notNull(),
-    schoolYear: varchar("school_year", { length: 256 }),
-    archivedAt: timestamp("archived_at").defaultNow().notNull(),
-  },
-  (table) => [
-    index("saa_class_student_test_idx").on(
-      table.classId,
-      table.studentNumber,
-      table.testNumber,
-    ),
-    index("saa_created_at_idx").on(table.createdAt),
-    index("saa_question_id_idx").on(table.questionId),
-  ],
-);
-
-// One row per submitted test (class + student + round). Written at submit time,
-// reconciled by aggregation. The fast source for counts/return-rate/daily charts.
-// Deliberately no FK on classId — same rationale as the archive table.
+// One row per submitted test (class + student + round). Written at submit time
+// in the same transaction as the answers; avg_score_percent is kept current by
+// each submit (SZP parts update it as they arrive) and by the recompute script.
+// The fast source for counts/return-rate/daily charts. Deliberately no FK on
+// classId — historical rows may predate referential cleanliness.
 export const studentTests = pgTable(
   "student_tests",
   {
