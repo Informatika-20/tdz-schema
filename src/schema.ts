@@ -222,7 +222,10 @@ export const tests = pgTable("tests", {
     .$defaultFn(() => crypto.randomUUID()),
   key: varchar("key", { length: 32 }).notNull().unique(), // matches modules.type and classes.test_key (e.g., "ss", "zs3", "ai1")
   name: varchar("name", { length: 256 }).notNull(), // display name (e.g., "Stredná škola", "AI pre 1. stupeň")
-  isDefault: boolean("is_default").default(false).notNull(), // does NOT gate access (cohorts do) — marks core test types; secretDashboard and the dashboard KPI cache derive special dashboard levels from NOT is_default (readers: src/app/secretDashboard/page.tsx, src/server/cache/dashboardKpiCache.ts)
+  // NOTE: the old is_default flag is gone. Its pre-cohorts meaning was
+  // "available to all teachers"; access is governed by cohorts +
+  // cohort_test_access, and the dashboard derives special levels from "not
+  // offered by any default cohort" (src/app/secretDashboard/page.tsx).
   modulesSelectable: boolean("modules_selectable").default(false).notNull(), // if true, teachers can select modules; if false, all modules for this test are used
   color: varchar("color", { length: 32 }), // optional, for UI styling
   description: varchar("description", { length: 512 }), // optional description
