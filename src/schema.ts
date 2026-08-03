@@ -129,6 +129,12 @@ export const studentAnswers = pgTable("student_answers", {
   classId: varchar("class_id", { length: 36 }).references(() => classes.id),
   testNumber: smallint("test_number"),
   questionId: varchar("question_id", { length: 36 }),
+  // Exactly one of questionId / interactiveTaskId is set. An interactive
+  // result row stores the full event-log Recording in `answer` and the
+  // server-recomputed finalScore (correctness 0–100) in `score`.
+  interactiveTaskId: varchar("interactive_task_id", { length: 36 }).references(
+    () => interactiveTasks.id,
+  ),
   answer: jsonb("answer"),
   score: smallint("score"),
   metadata: jsonb("metadata"),
@@ -156,7 +162,47 @@ export const studentAnswers = pgTable("student_answers", {
     // Date-based scans and the question-analysis GROUP BYs.
     index("student_answers_created_at_idx").on(table.createdAt),
     index("student_answers_question_id_idx").on(table.questionId),
+    // The Submission invariant for interactive answers. question_id is NULL on
+    // these rows, so the main submission index never fires for them (NULLs
+    // don't collide) — this index is what turns a duplicate interactive
+    // delivery into a constraint violation.
+    uniqueIndex("student_answers_interactive_submission_uq").on(
+      table.classId,
+      table.studentNumber,
+      table.testNumber,
+      table.interactiveTaskId,
+    ),
   ],
+);
+
+// Interactive "praktické" task placements (see .claude/docs/
+// interactive-tasks-spec.md). The interactive logic and answer key live in
+// code (the prototype registry); a row here is a *placement*: which prototype
+// appears in which module, with an optional per-placement config override.
+// Module membership in a test then follows the normal getClassModules rules.
+export const interactiveTasks = pgTable(
+  "interactive_tasks",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    // PrototypeKey ("sortFiles", "algoPath1", …) — validated against the code
+    // registry at authoring time; a key with no registry entry renders nothing.
+    prototype: varchar("prototype", { length: 32 }).notNull(),
+    // Optional overrides merged over the prototype's code-default config.
+    // Shape is prototype-specific.
+    config: jsonb("config"),
+    moduleId: varchar("module_id", { length: 36 })
+      .references(() => modules.id)
+      .notNull(),
+    // Ordering within the module (interleaved with questions at render time).
+    position: smallint("position").default(0).notNull(),
+    // Optional prompt shown above the task (falls back to the code label).
+    prompt: varchar("prompt", { length: 1024 }),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").$onUpdateFn(() => new Date()),
+  },
+  (t) => [index("interactive_tasks_module_id_idx").on(t.moduleId)],
 );
 
 export const cache = pgTable("cache", {
@@ -318,7 +364,7 @@ export const cohortTestAccess = pgTable(
 // soft-deleted class, DB errors, …). Archive-style — NO foreign keys, because a
 // failure cause is precisely a deleted/missing class; FKs would make this
 // fallback write fail too. Rows are recovered or dismissed from the admin
-// dashboard (/secretDashboard/failedSubmissions).
+// dashboard (/admin/failedSubmissions).
 export const failedSubmissions = pgTable("failed_submissions", {
   id: varchar("id", { length: 36 })
     .primaryKey()
