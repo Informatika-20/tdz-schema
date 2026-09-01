@@ -14,6 +14,7 @@ import {
   text,
   primaryKey,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 /**
  * This is an example of how to use the multi-project schema feature of Drizzle ORM. Use the same
@@ -166,12 +167,34 @@ export const studentAnswers = pgTable("student_answers", {
     // these rows, so the main submission index never fires for them (NULLs
     // don't collide) — this index is what turns a duplicate interactive
     // delivery into a constraint violation.
-    uniqueIndex("student_answers_interactive_submission_uq").on(
-      table.classId,
-      table.studentNumber,
-      table.testNumber,
-      table.interactiveTaskId,
-    ),
+    //
+    // PARTIAL on purpose. Without the predicate a btree still stores an entry
+    // for every row whose interactive_task_id is NULL — 4.0M of them against
+    // the 30 it can actually constrain, which cost 297 MB and a write on every
+    // single answer insert. Those entries can never collide anyway: this is
+    // PostgreSQL 14, where a unique index always treats NULLs as distinct
+    // (NULLS NOT DISTINCT only arrives in 15). Applied to production
+    // 2026-08-31; the index is 16 kB there now.
+    //
+    // Safe to keep partial only because nothing uses this index as an
+    // ON CONFLICT inference target — a partial unique index can only be
+    // inferred when the statement repeats the predicate. Nothing in tdz
+    // upserts into student_answers at all; both indexes here exist purely to
+    // RAISE 23505, which the submit path catches (isUniqueViolation →
+    // classifyConflict → echo / duplicate_number).
+    uniqueIndex("student_answers_interactive_submission_uq")
+      .on(
+        table.classId,
+        table.studentNumber,
+        table.testNumber,
+        table.interactiveTaskId,
+      )
+      // Raw column name, not `${table.interactiveTaskId}`: drizzle renders a
+      // column reference table-qualified ("student_answers"."interactive_task_id"),
+      // which Postgres accepts but immediately normalises back to the bare name
+      // in pg_indexes — so the qualified form reads as permanent drift on every
+      // introspect. This string matches what production actually stores.
+      .where(sql`interactive_task_id IS NOT NULL`),
   ],
 );
 
