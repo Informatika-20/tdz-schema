@@ -11,6 +11,7 @@ import {
   boolean,
   index,
   uniqueIndex,
+  check,
   text,
   primaryKey,
 } from "drizzle-orm/pg-core";
@@ -427,5 +428,50 @@ export const prototypeRecordings = pgTable(
   },
   (table) => [
     index("prototype_recordings_prototype_idx").on(table.prototype),
+  ],
+);
+
+// Module → lesson plan mapping: which INF 2.0 lesson plans to suggest to a
+// class that scored weakly in a module. Rows are drafted by an AI script
+// (tabula20 scripts/suggest-module-lessons.ts) and only reach teachers once a
+// person approves them in tabula20 — the class page reads status='approved'.
+//
+// level is relative to the class taking the module's test: beginner = lower
+// grades / SZP edition (foundations), intermediate = the class's own grade
+// band, pro = higher grades. Levels are disjoint per test.
+//
+// inf20_id names a lesson-plan Slot in tabula20's lesson_plans (shared by its
+// generations), so a replaced lesson keeps its mapping; woo_id/name/permalink
+// are a display snapshot refreshed from tabula20 on approval. No FK across
+// databases. Never DELETE a row — reject it (status='rejected').
+export const moduleLessonPlans = pgTable(
+  "module_lesson_plans",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    moduleId: varchar("module_id", { length: 36 })
+      .references(() => modules.id)
+      .notNull(),
+    level: varchar("level", { length: 16 }).notNull(), // beginner | intermediate | pro
+    rank: smallint("rank").notNull(), // 1 = best within (module, level)
+    inf20Id: varchar("inf20_id", { length: 256 }).notNull(),
+    wooId: integer("woo_id"),
+    name: varchar("name", { length: 512 }).notNull(),
+    permalink: varchar("permalink", { length: 512 }),
+    grade: smallint("grade"), // ročník of the lesson, when it has one
+    reason: text("reason"), // one line for the teacher: what the lesson trains
+    status: varchar("status", { length: 16 }).notNull().default("suggested"), // suggested | approved | rejected
+    source: varchar("source", { length: 16 }).notNull().default("ai"), // ai | manual
+    reviewedBy: varchar("reviewed_by", { length: 256 }),
+    reviewedAt: timestamp("reviewed_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").$onUpdateFn(() => new Date()),
+  },
+  (table) => [
+    uniqueIndex("module_lesson_plans_module_inf20_uq").on(table.moduleId, table.inf20Id),
+    index("module_lesson_plans_module_status_idx").on(table.moduleId, table.status),
+    check("module_lesson_plans_level_ck", sql`${table.level} IN ('beginner', 'intermediate', 'pro')`),
+    check("module_lesson_plans_status_ck", sql`${table.status} IN ('suggested', 'approved', 'rejected')`),
   ],
 );
