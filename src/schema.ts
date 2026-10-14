@@ -475,3 +475,15 @@ export const moduleLessonPlans = pgTable(
     check("module_lesson_plans_status_ck", sql`${table.status} IN ('suggested', 'approved', 'rejected')`),
   ],
 );
+
+// When the teacher last saw a class's „Odporúčané hodiny" card. The teacher
+// page tags a class while it has recommendations whose round started after
+// this (or it was never seen). A table of its own rather than a classes
+// column, so code that selects whole classes rows keeps working on a database
+// where this migration is not applied yet.
+export const classRecommendationSeen = pgTable("class_recommendation_seen", {
+  classId: varchar("class_id", { length: 36 })
+    .primaryKey()
+    .references(() => classes.id),
+  seenAt: timestamp("seen_at").notNull(),
+});
