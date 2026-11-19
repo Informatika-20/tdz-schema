@@ -487,3 +487,28 @@ export const classRecommendationSeen = pgTable("class_recommendation_seen", {
     .references(() => classes.id),
   seenAt: timestamp("seen_at").notNull(),
 });
+
+// Short test codes: `tdz.sk/slon4827` → the class's test (tdz
+// docs/2026-11-19-test-short-codes.md). A code is unique WITHIN a school year
+// (the PK) and resolves only in its class's own year, so codes are reused in
+// later years; one code per class and SZP part (part 0 = test without parts).
+// Rows are never deleted — a soft-deleted class keeps its code reserved.
+export const testCodes = pgTable(
+  "test_codes",
+  {
+    code: varchar("code", { length: 10 }).notNull(),
+    classId: varchar("class_id", { length: 36 })
+      .notNull()
+      .references(() => classes.id),
+    part: smallint("part").notNull(),
+    schoolYear: varchar("school_year", { length: 16 }).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({ name: "test_codes_pk", columns: [table.schoolYear, table.code] }),
+    uniqueIndex("test_codes_class_part_uq").on(table.classId, table.part),
+    index("test_codes_class_id_idx").on(table.classId),
+    check("test_codes_code_format", sql`${table.code} ~ '^[a-z]{2,6}[1-9][0-9]{3}$'`),
+    check("test_codes_part_range", sql`${table.part} BETWEEN 0 AND 4`),
+  ],
+);
