@@ -12,12 +12,18 @@
 -- deploys a schema containing these tables. No code deletes rows
 -- (soft-delete rule): pairs only change status. Deleting a linked
 -- interactive task is refused by the FK (accepted, spec §1.4).
+--
+-- drizzle-kit 0.31.8 reports SET DEFAULT '{}'::text[] for the two flags
+-- columns of these tables — false positive, catalogs verified identical (it
+-- reads an empty array default back as '{""}'). Review generated SQL; never
+-- push these tables. The id default is a bare gen_random_uuid() (assigned to
+-- varchar): drizzle-kit strips a trailing ::text when reading it back.
 
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 
 CREATE TABLE IF NOT EXISTS question_standards (
-  id                  varchar(36) PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  id                  varchar(36) PRIMARY KEY DEFAULT gen_random_uuid(),
   question_id         varchar(36) CONSTRAINT question_standards_question_id_fkey REFERENCES questions (id),
   interactive_task_id varchar(36) CONSTRAINT question_standards_interactive_task_id_fkey REFERENCES interactive_tasks (id),
   standard_code       varchar(16) NOT NULL
@@ -43,7 +49,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS question_standards_task_code
 CREATE INDEX IF NOT EXISTS question_standards_code_status ON question_standards (standard_code, status);
 
 CREATE TABLE IF NOT EXISTS question_standard_reviews (
-  id                  varchar(36) PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  id                  varchar(36) PRIMARY KEY DEFAULT gen_random_uuid(),
   question_id         varchar(36) CONSTRAINT question_standard_reviews_question_id_fkey REFERENCES questions (id),
   interactive_task_id varchar(36) CONSTRAINT question_standard_reviews_interactive_task_id_fkey REFERENCES interactive_tasks (id),
   state               varchar(10) NOT NULL

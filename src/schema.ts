@@ -481,12 +481,15 @@ export const moduleLessonPlans = pgTable(
 // covers. standardCode points at tabula20's curriculum_standards (no FK across
 // databases). Exactly one of questionId / interactiveTaskId is set. Hand-applied
 // DDL: ddl/2026-11-26-question-standards.sql. Never DELETE a row — reject it.
+// The id default is a bare gen_random_uuid() (no ::text) on both sides: drizzle-kit
+// strips a trailing cast when it reads a default back, so only the bare form
+// round-trips. flags still shows a drizzle-kit false positive — see the DDL header.
 export const questionStandards = pgTable(
   "question_standards",
   {
     id: varchar("id", { length: 36 })
       .primaryKey()
-      .default(sql`gen_random_uuid()::text`)
+      .default(sql`gen_random_uuid()`)
       .$defaultFn(() => crypto.randomUUID()),
     questionId: varchar("question_id", { length: 36 }),
     interactiveTaskId: varchar("interactive_task_id", { length: 36 }),
@@ -546,7 +549,7 @@ export const questionStandardReviews = pgTable(
   {
     id: varchar("id", { length: 36 })
       .primaryKey()
-      .default(sql`gen_random_uuid()::text`)
+      .default(sql`gen_random_uuid()`)
       .$defaultFn(() => crypto.randomUUID()),
     questionId: varchar("question_id", { length: 36 }),
     interactiveTaskId: varchar("interactive_task_id", { length: 36 }),
