@@ -223,6 +223,9 @@ export const interactiveTasks = pgTable(
     position: smallint("position").default(0).notNull(),
     // Optional prompt shown above the task (falls back to the code label).
     prompt: varchar("prompt", { length: 1024 }),
+    // Hidden from newly loaded tests, never deleted; set by tabula20 „Skryť".
+    deletedAt: timestamp("deleted_at"),
+    deletedBy: varchar("deleted_by", { length: 256 }),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").$onUpdateFn(() => new Date()),
   },
