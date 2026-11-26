@@ -486,6 +486,7 @@ export const questionStandards = pgTable(
   {
     id: varchar("id", { length: 36 })
       .primaryKey()
+      .default(sql`gen_random_uuid()::text`)
       .$defaultFn(() => crypto.randomUUID()),
     questionId: varchar("question_id", { length: 36 }),
     interactiveTaskId: varchar("interactive_task_id", { length: 36 }),
@@ -545,6 +546,7 @@ export const questionStandardReviews = pgTable(
   {
     id: varchar("id", { length: 36 })
       .primaryKey()
+      .default(sql`gen_random_uuid()::text`)
       .$defaultFn(() => crypto.randomUUID()),
     questionId: varchar("question_id", { length: 36 }),
     interactiveTaskId: varchar("interactive_task_id", { length: 36 }),
