@@ -9,16 +9,20 @@
 // - `answer`: what the pupil client submits for that type — the choice key
 //   (MultipleChoiceQuestion), the typed text as is (InputQuestion), or
 //   key → true / false / null for „Neviem" (StatementQuestion).
-// - `expectedScore`: what `calculateQuestionScore` (src/lib/scoring.ts)
-//   returns for `answer`, on the 0–100 scale it uses, in an ordinary module.
-//   The `sebavedomie` modules score multiple choice by letter instead
-//   (a=100, b=66, c=33, d=0) and ignore `correctAnswer`.
+// - `expectedScore`: exactly what
+//   `calculateQuestionScore(row.questionType, answer, row.correctAnswer,
+//   row.choices, row.moduleId)` (src/lib/scoring.ts) returns for the STORED
+//   row, on its 0–100 scale. What the pupil loader strips before the browser
+//   sees a question (`correctAnswer`, statement booleans) is a separate check.
+// - `alsoScores`: further answers to the same row, scored the same way.
 //
 // A statement keeps its answer key ONLY in `choices[key][1]`; `correctAnswer`
 // stays null. An input's `correctAnswer` is always an array of strings.
 export type QuestionRowFixture = {
   name: string;
   row: {
+    id: string;
+    moduleId: string;
     questionType: string;
     question: string;
     choices: unknown;
@@ -29,12 +33,15 @@ export type QuestionRowFixture = {
   };
   answer: unknown;
   expectedScore: number;
+  alsoScores?: { answer: unknown; expectedScore: number }[];
 };
 
 export const QUESTION_ROW_FIXTURES: readonly QuestionRowFixture[] = [
   {
     name: "multiple_choice",
     row: {
+      id: "00000000-0000-4000-8000-000000000001",
+      moduleId: "fixture-module",
       questionType: "multiple_choice",
       question: "Ktoré zariadenie je vstupné?",
       choices: {
@@ -56,6 +63,8 @@ export const QUESTION_ROW_FIXTURES: readonly QuestionRowFixture[] = [
     // drawn as an image (legacy path under /TDZ_images).
     name: "multiple_choice_image_choices",
     row: {
+      id: "00000000-0000-4000-8000-000000000002",
+      moduleId: "fixture-module",
       questionType: "multiple_choice",
       question: "Ktorý obrázok zobrazuje priečinok?",
       choices: {
@@ -76,6 +85,8 @@ export const QUESTION_ROW_FIXTURES: readonly QuestionRowFixture[] = [
     // An image uploaded through tabula20 is stored as its full URL.
     name: "multiple_choice_uploaded_image",
     row: {
+      id: "00000000-0000-4000-8000-000000000003",
+      moduleId: "fixture-module",
       questionType: "multiple_choice",
       question: "Čo je na obrázku?",
       choices: { a: "Myš", b: "Klávesnica", c: "Monitor" },
@@ -92,6 +103,8 @@ export const QUESTION_ROW_FIXTURES: readonly QuestionRowFixture[] = [
     // by the number of statements answered: (1 + 1 + 0) / 3 → 67.
     name: "statement",
     row: {
+      id: "00000000-0000-4000-8000-000000000004",
+      moduleId: "fixture-module",
       questionType: "statement",
       question: "Rozhodni, či sú tvrdenia o heslách pravdivé.",
       choices: {
@@ -110,6 +123,8 @@ export const QUESTION_ROW_FIXTURES: readonly QuestionRowFixture[] = [
   {
     name: "input",
     row: {
+      id: "00000000-0000-4000-8000-000000000005",
+      moduleId: "fixture-module",
       questionType: "input",
       question: "Koľko bitov má jeden bajt?",
       choices: null,
@@ -126,6 +141,8 @@ export const QUESTION_ROW_FIXTURES: readonly QuestionRowFixture[] = [
     // in a typed answer is ignored when it is compared.
     name: "with_audio",
     row: {
+      id: "00000000-0000-4000-8000-000000000006",
+      moduleId: "fixture-module",
       questionType: "input",
       question: "Vypočuj si nahrávku. Koľko metrov má jeden kilometer?",
       choices: null,
@@ -136,5 +153,50 @@ export const QUESTION_ROW_FIXTURES: readonly QuestionRowFixture[] = [
     },
     answer: "1 000",
     expectedScore: 100,
+  },
+  {
+    // In a sebavedomie module (id "sebavedomie" or ending in "-sebavedomie")
+    // the letter decides — a=100, b=66, c=33, d=0 — and the stored key is
+    // ignored: the key here says "a", the answer "b" still scores 66.
+    name: "sebavedomie",
+    row: {
+      id: "00000000-0000-4000-8000-000000000007",
+      moduleId: "sebavedomie",
+      questionType: "multiple_choice",
+      question: "Ako dobre vieš pracovať s počítačom?",
+      choices: {
+        a: "Veľmi dobre",
+        b: "Dobre",
+        c: "Trochu",
+        d: "Vôbec",
+      },
+      correctAnswer: ["a"],
+      scoringType: null,
+      image: null,
+      metadata: null,
+    },
+    answer: "b",
+    expectedScore: 66,
+  },
+  {
+    // An accepted answer is compared as stored (only whitespace is ignored),
+    // so quotes inside an array entry are part of the answer: it scores only
+    // when the pupil types them. The array is what keeps them — a bare jsonb
+    // string would lose its quotes on drizzle's read.
+    name: "input_quoted",
+    row: {
+      id: "00000000-0000-4000-8000-000000000008",
+      moduleId: "fixture-module",
+      questionType: "input",
+      question: "Napíš slovo ahoj v dvojitých úvodzovkách.",
+      choices: null,
+      correctAnswer: ['"ahoj"'],
+      scoringType: null,
+      image: null,
+      metadata: null,
+    },
+    answer: '"ahoj"',
+    expectedScore: 100,
+    alsoScores: [{ answer: "ahoj", expectedScore: 0 }],
   },
 ];
