@@ -14,6 +14,7 @@ import {
   check,
   text,
   primaryKey,
+  foreignKey,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -473,5 +474,116 @@ export const moduleLessonPlans = pgTable(
     index("module_lesson_plans_module_status_idx").on(table.moduleId, table.status),
     check("module_lesson_plans_level_ck", sql`${table.level} IN ('beginner', 'intermediate', 'pro')`),
     check("module_lesson_plans_status_ck", sql`${table.status} IN ('suggested', 'approved', 'rejected')`),
+  ],
+);
+
+// Which ŠVP 2023 informatics standards a test question or interactive task
+// covers. standardCode points at tabula20's curriculum_standards (no FK across
+// databases). Exactly one of questionId / interactiveTaskId is set. Hand-applied
+// DDL: ddl/2026-11-26-question-standards.sql. Never DELETE a row — reject it.
+export const questionStandards = pgTable(
+  "question_standards",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    questionId: varchar("question_id", { length: 36 }),
+    interactiveTaskId: varchar("interactive_task_id", { length: 36 }),
+    standardCode: varchar("standard_code", { length: 16 }).notNull(),
+    fit: varchar("fit", { length: 8 }).notNull(), // direct | partial
+    status: varchar("status", { length: 12 }).notNull().default("suggested"),
+    source: varchar("source", { length: 12 }).notNull(), // ai_agree | ai_split | ai_gap | manual
+    models: jsonb("models").notNull().default(sql`'{}'::jsonb`),
+    flags: text("flags").array().notNull().default(sql`'{}'::text[]`),
+    runId: varchar("run_id", { length: 32 }),
+    reviewedBy: varchar("reviewed_by", { length: 256 }),
+    reviewedAt: timestamp("reviewed_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (t) => [
+    foreignKey({
+      name: "question_standards_question_id_fkey",
+      columns: [t.questionId],
+      foreignColumns: [questions.id],
+    }),
+    foreignKey({
+      name: "question_standards_interactive_task_id_fkey",
+      columns: [t.interactiveTaskId],
+      foreignColumns: [interactiveTasks.id],
+    }),
+    uniqueIndex("question_standards_question_code")
+      .on(t.questionId, t.standardCode)
+      .where(sql`${t.questionId} IS NOT NULL`),
+    uniqueIndex("question_standards_task_code")
+      .on(t.interactiveTaskId, t.standardCode)
+      .where(sql`${t.interactiveTaskId} IS NOT NULL`),
+    index("question_standards_code_status").on(t.standardCode, t.status),
+    check(
+      "question_standards_standard_code_check",
+      sql`${t.standardCode} ~ '^if[123]-[vo]-\\d{3}[a-z]?$'`,
+    ),
+    check("question_standards_fit_check", sql`${t.fit} IN ('direct','partial')`),
+    check(
+      "question_standards_status_check",
+      sql`${t.status} IN ('suggested','approved','rejected')`,
+    ),
+    check(
+      "question_standards_source_check",
+      sql`${t.source} IN ('ai_agree','ai_split','ai_gap','manual')`,
+    ),
+    check(
+      "question_standards_one_item",
+      sql`num_nonnulls(${t.questionId}, ${t.interactiveTaskId}) = 1`,
+    ),
+  ],
+);
+
+// One review row per question / interactive task: input hashes drive staleness.
+export const questionStandardReviews = pgTable(
+  "question_standard_reviews",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    questionId: varchar("question_id", { length: 36 }),
+    interactiveTaskId: varchar("interactive_task_id", { length: 36 }),
+    state: varchar("state", { length: 10 }).notNull(), // pending | failed | reviewed | stale
+    latestInputHash: varchar("latest_input_hash", { length: 64 }),
+    reviewedInputHash: varchar("reviewed_input_hash", { length: 64 }),
+    models: jsonb("models").notNull().default(sql`'{}'::jsonb`),
+    flags: text("flags").array().notNull().default(sql`'{}'::text[]`),
+    version: integer("version").notNull().default(1),
+    runId: varchar("run_id", { length: 32 }),
+    reviewedBy: varchar("reviewed_by", { length: 256 }),
+    reviewedAt: timestamp("reviewed_at"),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+    inputSnapshot: jsonb("input_snapshot").notNull().default(sql`'{}'::jsonb`),
+  },
+  (t) => [
+    foreignKey({
+      name: "question_standard_reviews_question_id_fkey",
+      columns: [t.questionId],
+      foreignColumns: [questions.id],
+    }),
+    foreignKey({
+      name: "question_standard_reviews_interactive_task_id_fkey",
+      columns: [t.interactiveTaskId],
+      foreignColumns: [interactiveTasks.id],
+    }),
+    uniqueIndex("question_standard_reviews_question")
+      .on(t.questionId)
+      .where(sql`${t.questionId} IS NOT NULL`),
+    uniqueIndex("question_standard_reviews_task")
+      .on(t.interactiveTaskId)
+      .where(sql`${t.interactiveTaskId} IS NOT NULL`),
+    check(
+      "question_standard_reviews_state_check",
+      sql`${t.state} IN ('pending','failed','reviewed','stale')`,
+    ),
+    check(
+      "question_standard_reviews_one_item",
+      sql`num_nonnulls(${t.questionId}, ${t.interactiveTaskId}) = 1`,
+    ),
   ],
 );
